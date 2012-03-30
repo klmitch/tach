@@ -2,7 +2,10 @@
 
 ## Example instrumentation:
 
-### For the API, created in tach-api.conf
+### For the NovaAPI, using the OpenstackAPI, created in tach-api.conf
+    [global]
+    # also accepts a full path to the file, instead of a python module path
+    app_helper = tach_helper
 
     [notifier:statsd]
     driver = tach.notifiers.StatsDNotifier
@@ -17,20 +20,9 @@
     app_path = tach_helper
     app = process_stack
 
-### For compute, created in tach-compute.conf
+### Set up the helper script, created in tach_helper.py
 
-    [notifier:statsd]
-    driver = tach.notifiers.StatsDNotifier
-    host = <your statsd host>
-    port = <your statsd port, probably 8125>
-
-    [nova.compute.queue_receive]
-    module = nova.rpc.amqp.ProxyCallback
-    method = _process_data
-    metric = tach.metrics.ExecTime
-    notifier = statsd
-    app_path = tach_helper
-    app = queue_receive
+This is where things get a little messy, but that's the catch with trying to instrument something you don't want to modify directly...
 
 ### For network, created in tach-network.conf
 
@@ -83,7 +75,7 @@ This is where things get a little messy, but that's the catch with trying to ins
         resource = args[0]
         req = args[1].__dict__
         method = ".%s" % req['environ']['REQUEST_METHOD']
-        path = '.'.join(req['environ']['PATH_INFO'].split('/')[:3])
+        path = '.%s' % req['environ']['PATH_INFO'].split('/')[2]
         action = ".%s" % req['environ']['wsgiorg.routing_args'][1]['action']
         if action:
             key = 'nova.api%s%s%s' % (path, action, method)

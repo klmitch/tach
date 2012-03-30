@@ -23,8 +23,11 @@ class Config(object):
         # Parse the configuration file
         config = ConfigParser.SafeConfigParser()
         config.read(config_path)
-
+        app_helper = None
         # Process configuration
+        if config.has_section('global'):
+            app_helper = config.get('global', 'app_helper')
+            config.remove_section('global')
         for sec in config.sections():
             if sec == 'notifier' or sec.startswith('notifier:'):
                 # Make a notifier
@@ -38,7 +41,8 @@ class Config(object):
                     self.notifiers.setdefault(None, notifier)
             else:
                 # Make a method
-                method = Method(self, sec, config.items(sec))
+                method = Method(self, sec, config.items(sec),
+                                app_helper=app_helper)
 
                 # Add it to the recognized methods
                 self.methods.setdefault(method.label, method)
@@ -64,20 +68,6 @@ class Config(object):
         else:
             return [self.methods[meth] for meth in methods
                     if meth in self.methods]
-
-    def install(self, *methods):
-        """Install the given metric gatherers."""
-
-        # Call their install methods
-        for meth in self._methods(methods):
-            meth.install()
-
-    def uninstall(self, *methods):
-        """Uninstall the given metric gatherers."""
-
-        # Call their uninstall methods
-        for meth in self._methods(methods):
-            meth.uninstall()
 
 
 class Notifier(object):
@@ -183,7 +173,7 @@ def _get_method(cls, name):
 class Method(object):
     """Represent a method wrapped with metric collection."""
 
-    def __init__(self, config, label, items):
+    def __init__(self, config, label, items, **kwargs):
         """Initialize a method wrapped with metric collection.
 
         :param config: The global configuration; needed for the
@@ -198,10 +188,11 @@ class Method(object):
         self.label = label
         self._app_cache = None
         self._metric_cache = None
+        self._app_helper = kwargs.get('app_helper')
 
         # Other important configuration values
         required = set(['module', 'method', 'metric'])
-        attrs = set(['notifier', 'app', 'app_path']) | required
+        attrs = set(['notifier', 'app']) | required
         for attr in attrs:
             setattr(self, '_' + attr, None)
         self.additional = {}
@@ -214,11 +205,9 @@ class Method(object):
             else:
                 self.additional[option] = value
 
-            # Add app or app_path to required if necessary
-            if option == 'app' and not self._app_path:
-                required.add('app_path')
-            elif option == 'app_path' and not self._app:
-                required.add('app')
+            # Add app to required if necessary
+            if option == 'app' and not self._app_helper:
+                required.add('app_helper')
 
         # Make sure we got the essential configuration
         if required:
@@ -263,7 +252,6 @@ class Method(object):
                           label or self.label)
 
             return result
-
         # Save some introspecting data
         wrapper.tach_descriptor = self
         wrapper.tach_function = method
@@ -273,20 +261,12 @@ class Method(object):
         self._method_wrapper = meth_wrap(wrapper)
         self._method_orig = raw_method
 
+        setattr(self._method_cls, self._method, self._method_wrapper)
+
     def __getitem__(self, key):
         """Allow access to additional configuration."""
 
         return self.additional[key]
-
-    def install(self):
-        """Install the metric collector."""
-
-        setattr(self._method_cls, self._method, self._method_wrapper)
-
-    def uninstall(self):
-        """Uninstall the metric collector."""
-
-        setattr(self._method_cls, self._method, self._method_orig)
 
     @property
     def method(self):
@@ -297,13 +277,12 @@ class Method(object):
     @property
     def app(self):
         """Return the application transformer."""
-
         # Don't crash if we don't have an app set
-        if not self._app or not self._app_path:
+        if not self._app or not self._app_helper:
             return None
 
         if not self._app_cache:
-            app_cls = utils.import_class_or_module(self._app_path)
+            app_cls = utils.import_class_or_module(self._app_helper)
             self._app_cache = getattr(app_cls, self._app)
 
         return self._app_cache
